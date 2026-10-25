@@ -1,5 +1,5 @@
 // Keeps the app on the phone so it opens with no signal (D32). Bump VERSION when a file changes.
-const VERSION = "tt-ratings-1";
+const VERSION = "tt-ratings-2";
 const FILES = ["./", "index.html", "app.js", "manifest.webmanifest", "icon-192.png", "icon-512.png"];
 
 self.addEventListener("install", (e) => {

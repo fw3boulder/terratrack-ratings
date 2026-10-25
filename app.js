@@ -9,6 +9,9 @@ const WORDS = { "1": "paved", "2": "maintained gravel", "3a": "rough dirt", "3a/
                 "3b": "rough, knobbies", "4": "rocky two-track", "5": "extreme", "?": "unknown" };
 const FOLDER = "TerraTrack ratings";
 const SCOPE = "https://www.googleapis.com/auth/drive.file";
+// The OAuth client ID of the "TerraTrack" Google Cloud project (not a secret: Google shows it to every
+// browser that signs in). Setup can override it.
+const CLIENT_ID = "332662345008-oo92i8rssb5ajrpanb3f0fvse7n51ge2.apps.googleusercontent.com";
 const $ = (id) => document.getElementById(id);
 
 // --- Storage (wrapped: private windows or cleared data must not break the page) ---------------
@@ -144,7 +147,7 @@ function renderAll() {
 
 // --- Setup tab -------------------------------------------------------------------------------
 function renderSetup() {
-  $("client").value = load("client", "");
+  $("client").value = load("client", CLIENT_ID);
   const ids = Object.keys(days);
   $("days").innerHTML = ids.length ? ids.map((id) => {
     const n = Object.values(ratings[id] || {}).filter((x) => !x.skipped).length;
@@ -199,7 +202,7 @@ $("tabSetup").onclick = () => tab("setup");
 function chip() {
   const b = $("sync");
   b.className = "chip";
-  if (!load("client", "")) { b.textContent = "⚙ Set up sync"; return; }
+  if (!load("client", CLIENT_ID)) { b.textContent = "⚙ Set up sync"; return; }
   if (!dirty.length) { b.textContent = lastSync ? `✓ Synced ${hhmm(lastSync)}` : "✓ Nothing to send"; b.classList.add("ok"); return; }
   b.classList.add("wait");
   b.textContent = !navigator.onLine ? `⏳ ${dirty.length} waiting for signal` : tokenOk() ? "↻ Syncing…" : "↻ Tap to sync";
@@ -220,7 +223,7 @@ function gis() {
 async function getToken(interactive) {
   if (tokenOk()) return token.access_token;
   if (!interactive || !navigator.onLine) return null;
-  const client = load("client", "");
+  const client = load("client", CLIENT_ID);
   if (!client) return null;
   await gis();
   return new Promise((resolve) => {
@@ -299,7 +302,7 @@ async function sync(interactive) {
   }
 }
 
-$("sync").onclick = () => { if (!load("client", "")) tab("setup"); else sync(true); };
+$("sync").onclick = () => { if (!load("client", CLIENT_ID)) tab("setup"); else sync(true); };
 $("signin").onclick = async () => {
   const v = $("client").value.trim();
   if (!v.endsWith(".apps.googleusercontent.com")) { $("driveMsg").textContent = "✕ That doesn't look like a Google client ID."; return; }
