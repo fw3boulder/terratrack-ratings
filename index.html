@@ -66,6 +66,8 @@
   #full { position: fixed; inset: 0; background: var(--bg); z-index: 1000; display: flex; flex-direction: column; }
   #full .bar { display: flex; align-items: center; justify-content: space-between; padding: 10px 16px; }
   #fullmap { flex: 1; }
+  #pickBar { gap: 10px; border-top: 1px solid var(--line); padding-bottom: calc(10px + env(safe-area-inset-bottom)); }
+  #pickBar .chip { padding: 10px 16px; font-size: 16px; }
 </style>
 </head>
 <body>
@@ -108,9 +110,11 @@
 </section>
 
 <div id="full" class="hidden">
-  <div class="bar"><span class="muted">Blue: this chunk · colors: your ratings · gray: still to rate</span>
+  <div class="bar"><span class="muted">Zoom in, <b>tap the route</b>, then <b>Rate this</b> · blue: current · colors: your ratings</span>
     <button id="fullClose" class="chip" type="button">✕ Close</button></div>
   <div id="fullmap"></div>
+  <div id="pickBar" class="bar hidden"><span id="pickName"></span>
+    <button id="pickGo" class="chip ok" type="button" style="font-weight:600">Rate this ▶</button></div>
 </div>
 
 <script src="lib/leaflet.js"></script>

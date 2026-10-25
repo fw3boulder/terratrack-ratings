@@ -64,7 +64,7 @@ function renderRate() {
   }
   if (idx === null) idx = startIndex();
   const r = dayRatings();
-  const left = d.chunks.filter((c) => !r[c.id]).length;
+  const done = d.chunks.filter((c) => r[c.id] && r[c.id].cls_name).length;
   if (idx < 0) {
     el.innerHTML = `<div class="card empty"><h2>✓ All ${d.chunks.length} rated</h2><p class="muted">${esc(d.name)} · ${d.miles} mi. Change any on the <b>All</b> tab.</p></div>`;
     return;
@@ -74,7 +74,8 @@ function renderRate() {
   draft = draft && draft.id === c.id ? draft : { id: c.id, cls: saved?.cls_name || null, liked: saved?.liked || 0, note: saved?.note || "" };
   const asSaid = CLASSES.includes(c.guess);
   el.innerHTML = `
-    <p class="muted">${left} of ${d.chunks.length} left · chunk ${idx + 1}</p>
+    <div class="row"><p class="muted">${done} of ${d.chunks.length} rated · chunk ${idx + 1} · rate the ones you remember</p>
+      <button type="button" class="chip" id="pick" style="flex:none">🗺 Pick on map</button></div>
     <div class="card">
       <div id="daymap" class="daymap" role="button" aria-label="Map of the day's ride; tap for a bigger map"></div>
       ${strip(d, r, idx)}
@@ -107,7 +108,8 @@ function renderRate() {
   $("next").onclick = () => { if (draft.cls) store(c, { cls_name: draft.cls }); move(); };
   el.querySelectorAll("[data-jump]").forEach((b) => b.onclick = () => { draft = null; idx = +b.dataset.jump; renderRate(); });
   miniMap = drawDay(miniMap, "daymap", d, r, idx, false);
-  $("daymap").onclick = () => openFull(d, r, idx);
+  $("daymap").onclick = () => openFull(d, r, idx, false);
+  $("pick").onclick = () => openFull(d, r, idx, true);
 }
 
 // --- Day map (Leaflet; the topo tiles are saved on the phone when a trip day is loaded) ------
@@ -124,7 +126,8 @@ function drawDay(map, elId, d, r, current, full) {
   map = L.map(elId, { zoomControl: full, attributionControl: full, dragging: full, scrollWheelZoom: full,
                       doubleClickZoom: full, boxZoom: false, keyboard: false, touchZoom: full, tap: false });
   L.tileLayer(TILES, { maxZoom: 16, maxNativeZoom: 16, attribution: "USGS The National Map" }).addTo(map);
-  L.polyline(routeOf(d), { color: "#868e96", weight: full ? 4 : 3, opacity: 0.9 }).addTo(map);
+  L.polyline(routeOf(d), { color: "#fff", weight: full ? 8 : 5, opacity: 0.9 }).addTo(map);
+  L.polyline(routeOf(d), { color: "#495057", weight: full ? 4 : 3 }).addTo(map);
   d.chunks.forEach((c, i) => {
     const s = r[c.id];
     if (s && s.cls_name && i !== current) L.polyline(c.coords, { color: RATED[s.cls_name], weight: full ? 5 : 4 }).addTo(map);
@@ -135,16 +138,58 @@ function drawDay(map, elId, d, r, current, full) {
   const route = routeOf(d);
   L.circleMarker(route[0], { radius: 6, color: "#fff", weight: 2, fillColor: "#2f9e44", fillOpacity: 1 }).addTo(map).bindTooltip("Start");
   L.circleMarker(route[route.length - 1], { radius: 6, color: "#fff", weight: 2, fillColor: "#212529", fillOpacity: 1 }).addTo(map).bindTooltip("Finish");
-  (d.towns || []).slice(0, full ? 40 : 6).forEach((t) => L.marker([t.lat, t.lon], { interactive: false, icon: L.divIcon({
-    className: "", iconSize: [0, 0], html: `<div class="town ${t.kind === "city" || t.kind === "town" ? "big" : ""}">${esc(t.name)}</div>` }) }).addTo(map));
-  if (full) map.fitBounds(L.latLngBounds(c.coords).pad(0.6));
-  else map.fitBounds(L.latLngBounds(route), { padding: [8, 8] });
+  // Town names: cities and towns always; villages from zoom 10, hamlets from zoom 12 (full map only).
+  const labels = L.layerGroup().addTo(map);
+  const minZoom = { city: 0, town: 0, village: 10, hamlet: 12 };
+  const showTowns = () => {
+    labels.clearLayers();
+    (d.towns || []).filter((t) => full ? map.getZoom() >= (minZoom[t.kind] ?? 12) : true).slice(0, full ? 60 : 6)
+      .forEach((t) => L.marker([t.lat, t.lon], { interactive: false, icon: L.divIcon({ className: "", iconSize: [0, 0],
+        html: `<div class="town ${t.kind === "city" || t.kind === "town" ? "big" : ""}">${esc(t.name)}</div>` }) }).addTo(labels));
+  };
+  if (full) map.on("zoomend", showTowns);
+  if (full === "day" || !full) map.fitBounds(L.latLngBounds(route), { padding: full ? [24, 24] : [8, 8] });
+  else map.fitBounds(L.latLngBounds(c.coords).pad(0.6));
+  if (full) map.on("click", (e) => pickAt(map, d, e.latlng));
+  showTowns();
   return map;
 }
 
-function openFull(d, r, current) {
+let picked = null, pickLayer = null;
+
+function pickAt(map, d, at) {
+  // Highlights the chunk whose line passes closest to the tap (within about 30 px) and offers it in
+  // the bar below; nothing jumps until "Rate this", so double-tap and pinch zoom stay free.
+  const p = map.latLngToContainerPoint(at);
+  let best = null;
+  d.chunks.forEach((c, i) => c.coords.forEach((q, k) => {
+    if (k === 0) return;
+    const dist = L.LineUtil.pointToSegmentDistance(p, map.latLngToContainerPoint(c.coords[k - 1]), map.latLngToContainerPoint(q));
+    if (!best || dist < best.dist) best = { i, dist };
+  }));
+  if (!best || best.dist > 30) return;
+  picked = best.i;
+  const c = d.chunks[picked], s = dayRatings()[c.id];
+  if (pickLayer) map.removeLayer(pickLayer);
+  pickLayer = L.layerGroup([L.polyline(c.coords, { color: "#fff", weight: 13 }), L.polyline(c.coords, { color: "#f59f00", weight: 8 })]).addTo(map);
+  $("pickName").innerHTML = `<b>${esc(c.roads)}</b><br><span class="muted">mile ${c.from_mi}–${c.to_mi} · ${c.miles} mi${s && s.cls_name ? " · rated " + esc(s.cls_name) : ""}</span>`;
+  $("pickBar").classList.remove("hidden");
+  setTimeout(() => map.invalidateSize({ pan: false }), 0);  // the bar takes some of the map's height
+}
+
+$("pickGo").onclick = () => {
+  if (picked === null) return;
+  $("full").classList.add("hidden");
+  idx = picked; draft = null; picked = null;
+  tab("rate");
+  window.scrollTo(0, 0);
+};
+
+function openFull(d, r, current, browse) {
   $("full").classList.remove("hidden");
-  fullMap = drawDay(fullMap, "fullmap", d, r, current, true);
+  $("pickBar").classList.add("hidden");
+  picked = null; pickLayer = null;
+  fullMap = drawDay(fullMap, "fullmap", d, r, current, browse ? "day" : "chunk");
   setTimeout(() => fullMap && fullMap.invalidateSize(), 50);
 }
 $("fullClose").onclick = () => { $("full").classList.add("hidden"); };
