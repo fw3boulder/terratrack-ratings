@@ -1,5 +1,5 @@
 // Keeps the app on the phone so it opens with no signal (D32). Bump VERSION when a file changes.
-const VERSION = "tt-ratings-5";
+const VERSION = "tt-ratings-6";
 const TILE_CACHE = "tt-tiles";  // topo map tiles saved per trip day; kept across versions
 const FILES = ["./", "index.html", "app.js", "manifest.webmanifest", "icon-192.png", "icon-512.png",
                "lib/leaflet.js", "lib/leaflet.css"];

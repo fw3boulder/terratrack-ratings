@@ -35,7 +35,7 @@ let draft = null;                      // the card's unsaved choices
 let tokenClient = null;
 
 if (navigator.storage && navigator.storage.persist) navigator.storage.persist().catch(() => {});
-const APP_VERSION = 5;  // shown under Setup; keep in step with VERSION in sw.js
+const APP_VERSION = 6;  // shown under Setup; keep in step with VERSION in sw.js
 if ("serviceWorker" in navigator) {
   // When an update takes over, reload once so the new version shows straight away.
   const hadController = !!navigator.serviceWorker.controller;
@@ -81,7 +81,6 @@ function renderRate() {
   const c = d.chunks[idx];
   const saved = r[c.id];
   draft = draft && draft.id === c.id ? draft : { id: c.id, cls: saved?.cls_name || null, liked: saved?.liked || 0, note: saved?.note || "" };
-  const asSaid = CLASSES.includes(c.guess);
   el.innerHTML = `
     <div class="row"><p class="muted">${done} of ${d.chunks.length} rated · chunk ${idx + 1} · rate the ones you remember</p>
       <button type="button" class="chip" id="pick" style="flex:none">🗺 Pick on map</button></div>
@@ -95,25 +94,25 @@ function renderRate() {
       <div class="grid" role="group" aria-label="Class">
         ${CLASSES.map((k) => `<button type="button" data-cls="${k}" aria-pressed="${draft.cls === k}" style="border-bottom:5px solid ${guessColor(k)}">${k}</button>`).join("")}
       </div>
-      ${asSaid ? `<button type="button" class="big" id="asSaid" aria-pressed="${draft.cls === c.guess}">As TerraTrack said (${esc(c.guess)})</button>` : ""}
       <div class="thumbs">
         <button type="button" data-like="1" aria-pressed="${draft.liked === 1}">👍 Liked it</button>
         <button type="button" data-like="-1" aria-pressed="${draft.liked === -1}">👎 Didn't</button>
       </div>
-      <textarea id="note" rows="2" placeholder="Note (tap the mic on the keyboard)">${esc(draft.note)}</textarea>
       <div class="nav">
-        <button type="button" id="back" ${idx === 0 ? "disabled" : ""}>◀ Back</button>
-        <button type="button" id="skip">Skip</button>
+        <button type="button" id="back" ${idx === 0 ? "disabled" : ""} aria-label="Back">◀</button>
+        <button type="button" id="skip" title="Rode it, don't remember">Skip</button>
+        <button type="button" id="notRidden" title="Not on the road we rode (a drawing slip or a detour)">Not ridden</button>
         <button type="button" id="next" class="next">${draft.cls ? "Save ▶" : "Next ▶"}</button>
       </div>
-      ${saved ? `<p class="muted">${saved.skipped ? "Skipped" : "Saved"} ${hhmm(saved.rated_at)}</p>` : ""}
+      <input id="note" type="text" class="note" placeholder="Note" value="${esc(draft.note)}">
+      ${saved ? `<p class="muted">${saved.not_ridden ? "Marked not ridden" : saved.skipped ? "Skipped" : "Saved"} ${hhmm(saved.rated_at)}</p>` : ""}
     </div>`;
   el.querySelectorAll("[data-cls]").forEach((b) => b.onclick = () => { draft.cls = draft.cls === b.dataset.cls ? null : b.dataset.cls; renderRate(); });
-  if (asSaid) $("asSaid").onclick = () => { draft.cls = c.guess; renderRate(); };
   el.querySelectorAll("[data-like]").forEach((b) => b.onclick = () => { const v = +b.dataset.like; draft.liked = draft.liked === v ? 0 : v; renderRate(); });
   $("note").oninput = (e) => { draft.note = e.target.value; };
   $("back").onclick = () => { draft = null; idx = Math.max(0, idx - 1); renderRate(); };
   $("skip").onclick = () => { store(c, { skipped: true }); move(); };
+  $("notRidden").onclick = () => { store(c, { not_ridden: true }); move(); };
   $("next").onclick = () => { if (draft.cls) store(c, { cls_name: draft.cls }); move(); };
   el.querySelectorAll("[data-jump]").forEach((b) => b.onclick = () => { draft = null; idx = +b.dataset.jump; renderRate(); });
   miniMap = drawDay(miniMap, "daymap", d, r, idx, false);
@@ -207,7 +206,7 @@ function strip(d, r, current) {
   // One bar for the whole day, a block per chunk (width by miles); tap one to go to it.
   return `<div class="strip" aria-label="Where this chunk is in the day">` + d.chunks.map((c, i) => {
     const s = r[c.id];
-    const bg = i === current ? "#1c7ed6" : s && s.cls_name ? RATED[s.cls_name] : s ? "#ffd8a8" : "#dee2e6";
+    const bg = i === current ? "#1c7ed6" : s && s.not_ridden ? "#ffc9c9" : s && s.cls_name ? RATED[s.cls_name] : s ? "#ffd8a8" : "#dee2e6";
     return `<button type="button" data-jump="${i}" style="flex:${Math.max(c.miles, 0.3)};background:${bg}" aria-label="Chunk ${i + 1}: ${esc(c.roads)}"></button>`;
   }).join("") + `</div>`;
 }
@@ -272,7 +271,8 @@ function renderAll() {
   el.innerHTML = `<p class="muted">${esc(d.name)} · ${d.miles} mi · tap one to change it</p><ul class="list">` +
     d.chunks.map((c, i) => {
       const s = r[c.id];
-      const mark = !s ? `<span class="mark todo">○ To rate</span>` : s.skipped ? `<span class="mark skip">– Skipped</span>`
+      const mark = !s ? `<span class="mark todo">○ To rate</span>` : s.not_ridden ? `<span class="mark skip">✕ Not ridden</span>`
+        : s.skipped ? `<span class="mark skip">– Skipped</span>`
         : `<span class="mark done">✓ ${esc(s.cls_name)}${s.liked === 1 ? " 👍" : s.liked === -1 ? " 👎" : ""}</span>`;
       return `<li data-i="${i}">${mark}<span>${esc(c.roads)}<br><span class="muted">mile ${c.from_mi}–${c.to_mi} · ${c.miles} mi</span></span></li>`;
     }).join("") + "</ul>";
@@ -401,9 +401,11 @@ async function folderId(at) {
 
 function payload(tripId) {
   const d = days[tripId];
-  const list = Object.values(ratings[tripId] || {}).filter((r) => !r.skipped && r.cls_name);
+  const all = Object.values(ratings[tripId] || {});
+  const list = all.filter((r) => !r.skipped && !r.not_ridden && r.cls_name);
   return JSON.stringify({ kind: "terratrack-ratings", version: 1, trip_id: tripId, trip_name: d ? d.name : tripId,
-                          updated: new Date().toISOString(), ratings: list });
+                          updated: new Date().toISOString(), ratings: list,
+                          not_ridden: all.filter((r) => r.not_ridden).map((r) => ({ chunk_id: r.chunk_id, coords: r.coords })) });
 }
 
 async function upload(tripId, at) {
