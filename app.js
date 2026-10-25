@@ -35,7 +35,7 @@ let draft = null;                      // the card's unsaved choices
 let tokenClient = null;
 
 if (navigator.storage && navigator.storage.persist) navigator.storage.persist().catch(() => {});
-const APP_VERSION = 6;  // shown under Setup; keep in step with VERSION in sw.js
+const APP_VERSION = 7;  // shown under Setup; keep in step with VERSION in sw.js
 if ("serviceWorker" in navigator) {
   // When an update takes over, reload once so the new version shows straight away.
   const hadController = !!navigator.serviceWorker.controller;
@@ -105,15 +105,20 @@ function renderRate() {
         <button type="button" id="next" class="next">${draft.cls ? "Save ▶" : "Next ▶"}</button>
       </div>
       <input id="note" type="text" class="note" placeholder="Note" value="${esc(draft.note)}">
-      ${saved ? `<p class="muted">${saved.not_ridden ? "Marked not ridden" : saved.skipped ? "Skipped" : "Saved"} ${hhmm(saved.rated_at)}</p>` : ""}
+      ${saved ? `<p class="muted">${saved.not_ridden ? "✕ Marked not ridden" : saved.skipped ? "– Skipped" : "✓ Saved " + esc(saved.cls_name)} ${hhmm(saved.rated_at)} · <button type="button" id="clear" class="linkbtn">Clear</button></p>` : ""}
     </div>`;
   el.querySelectorAll("[data-cls]").forEach((b) => b.onclick = () => { draft.cls = draft.cls === b.dataset.cls ? null : b.dataset.cls; renderRate(); });
   el.querySelectorAll("[data-like]").forEach((b) => b.onclick = () => { const v = +b.dataset.like; draft.liked = draft.liked === v ? 0 : v; renderRate(); });
   $("note").oninput = (e) => { draft.note = e.target.value; };
-  $("back").onclick = () => { draft = null; idx = Math.max(0, idx - 1); renderRate(); };
-  $("skip").onclick = () => { store(c, { skipped: true }); move(); };
-  $("notRidden").onclick = () => { store(c, { not_ridden: true }); move(); };
-  $("next").onclick = () => { if (draft.cls) store(c, { cls_name: draft.cls }); move(); };
+  $("back").onclick = () => { draft = null; fromPick = null; idx = Math.max(0, idx - 1); renderRate(); };
+  const where = `${c.roads} (mile ${c.from_mi})`;
+  $("skip").onclick = () => { store(c, { skipped: true }); toast(`– Skipped ${where}`); move(); };
+  $("notRidden").onclick = () => { store(c, { not_ridden: true }); toast(`✕ Not ridden: ${where}`); move(); };
+  if (saved) $("clear").onclick = () => { store(c, {}); delete dayRatings()[c.id]; changed(); toast(`Cleared ${where}`); draft = null; renderRate(); };
+  $("next").onclick = () => {
+    if (draft.cls) { const k = draft.cls; store(c, { cls_name: k }); toast(`✓ ${k} saved: ${c.roads} (mile ${c.from_mi})`); }
+    move();
+  };
   el.querySelectorAll("[data-jump]").forEach((b) => b.onclick = () => { draft = null; idx = +b.dataset.jump; renderRate(); });
   miniMap = drawDay(miniMap, "daymap", d, r, idx, false);
   $("daymap").onclick = () => openFull(d, r, idx, false);
@@ -187,20 +192,22 @@ function pickAt(map, d, at) {
 
 $("pickGo").onclick = () => {
   if (picked === null) return;
+  fromPick = { center: fullMap.getCenter(), zoom: fullMap.getZoom() };
   $("full").classList.add("hidden");
   idx = picked; draft = null; picked = null;
   tab("rate");
   window.scrollTo(0, 0);
 };
 
-function openFull(d, r, current, browse) {
+function openFull(d, r, current, browse, view) {
   $("full").classList.remove("hidden");
   $("pickBar").classList.add("hidden");
   picked = null; pickLayer = null;
   fullMap = drawDay(fullMap, "fullmap", d, r, current, browse ? "day" : "chunk");
+  if (view) fullMap.setView(view.center, view.zoom, { animate: false });
   setTimeout(() => fullMap && fullMap.invalidateSize(), 50);
 }
-$("fullClose").onclick = () => { $("full").classList.add("hidden"); };
+$("fullClose").onclick = () => { $("full").classList.add("hidden"); fromPick = null; tab("rate"); };
 
 function strip(d, r, current) {
   // One bar for the whole day, a block per chunk (width by miles); tap one to go to it.
@@ -244,8 +251,12 @@ async function saveTiles(d, report) {
   }
 }
 
+let fromPick = null;   // the map view to go back to when a chunk was opened with Pick on map
+let undo = null, toastTimer = null;
+
 function store(c, fields) {
   const r = dayRatings();
+  undo = { trip: current, id: c.id, before: r[c.id] || null, at: idx };
   r[c.id] = Object.assign({ chunk_id: c.id, liked: draft.liked || 0, note: draft.note.trim(), rated_at: new Date().toISOString(),
                             coords: c.coords, guess: c.guess }, fields);
   save("ratings", ratings);
@@ -254,9 +265,35 @@ function store(c, fields) {
   sync(false);
 }
 
+function changed() {
+  save("ratings", ratings);
+  if (!dirty.includes(current)) dirty.push(current);
+  save("dirty", dirty);
+  sync(false);
+}
+
+function toast(text) {
+  $("toastText").textContent = text;
+  $("toast").classList.remove("hidden");
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => $("toast").classList.add("hidden"), 6000);
+}
+
+$("toastUndo").onclick = () => {
+  if (!undo || undo.trip !== current) return;
+  const r = dayRatings();
+  if (undo.before) r[undo.id] = undo.before; else delete r[undo.id];
+  changed();
+  idx = undo.at; draft = null; undo = null;
+  $("toast").classList.add("hidden");
+  $("full").classList.add("hidden");
+  tab("rate");
+};
+
 function move() {
   draft = null;
   const d = day(), r = dayRatings();
+  if (fromPick) { const view = fromPick; fromPick = null; openFull(d, r, idx, true, view); return; }
   const next = d.chunks.findIndex((c, i) => i > idx && !r[c.id]);
   idx = next >= 0 ? next : d.chunks.findIndex((c) => !r[c.id]);
   renderRate();
@@ -401,7 +438,8 @@ async function folderId(at) {
 
 function payload(tripId) {
   const d = days[tripId];
-  const all = Object.values(ratings[tripId] || {});
+  const now = new Set(d ? d.chunks.map((c) => c.id) : []);
+  const all = Object.values(ratings[tripId] || {}).filter((r) => now.has(r.chunk_id));
   const list = all.filter((r) => !r.skipped && !r.not_ridden && r.cls_name);
   return JSON.stringify({ kind: "terratrack-ratings", version: 1, trip_id: tripId, trip_name: d ? d.name : tripId,
                           updated: new Date().toISOString(), ratings: list,
