@@ -1,11 +1,13 @@
 // Keeps the app on the phone so it opens with no signal (D32). Bump VERSION when a file changes.
-const VERSION = "tt-ratings-4";
+const VERSION = "tt-ratings-5";
 const TILE_CACHE = "tt-tiles";  // topo map tiles saved per trip day; kept across versions
 const FILES = ["./", "index.html", "app.js", "manifest.webmanifest", "icon-192.png", "icon-512.png",
                "lib/leaflet.js", "lib/leaflet.css"];
 
 self.addEventListener("install", (e) => {
-  e.waitUntil(caches.open(VERSION).then((c) => c.addAll(FILES)).then(() => self.skipWaiting()));
+  // cache: "reload" skips the browser's own short-term cache, so an update never re-saves old files.
+  e.waitUntil(caches.open(VERSION).then((c) => c.addAll(FILES.map((f) => new Request(f, { cache: "reload" }))))
+    .then(() => self.skipWaiting()));
 });
 
 self.addEventListener("activate", (e) => {
@@ -24,7 +26,7 @@ self.addEventListener("fetch", (e) => {
   if (e.request.method !== "GET" || url.origin !== location.origin) return;  // Google sign-in and Drive go to the network
   // The app's own files: from the phone first, refreshed in the background when there is signal.
   e.respondWith(caches.open(VERSION).then((cache) => cache.match(e.request, { ignoreSearch: true }).then((hit) => {
-    const fresh = fetch(e.request).then((res) => { if (res.ok) cache.put(e.request, res.clone()); return res; }).catch(() => hit);
+    const fresh = fetch(e.request, { cache: "no-cache" }).then((res) => { if (res.ok) cache.put(e.request, res.clone()); return res; }).catch(() => hit);
     return hit || fresh;
   })));
 });

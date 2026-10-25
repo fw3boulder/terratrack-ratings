@@ -35,7 +35,16 @@ let draft = null;                      // the card's unsaved choices
 let tokenClient = null;
 
 if (navigator.storage && navigator.storage.persist) navigator.storage.persist().catch(() => {});
-if ("serviceWorker" in navigator) navigator.serviceWorker.register("sw.js").catch(() => {});
+const APP_VERSION = 5;  // shown under Setup; keep in step with VERSION in sw.js
+if ("serviceWorker" in navigator) {
+  // When an update takes over, reload once so the new version shows straight away.
+  const hadController = !!navigator.serviceWorker.controller;
+  let reloaded = false;
+  navigator.serviceWorker.addEventListener("controllerchange", () => {
+    if (hadController && !reloaded) { reloaded = true; location.reload(); }
+  });
+  navigator.serviceWorker.register("sw.js", { updateViaCache: "none" }).then((reg) => reg.update()).catch(() => {});
+}
 
 // --- Helpers ---------------------------------------------------------------------------------
 function esc(s) { return String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c])); }
@@ -273,6 +282,7 @@ function renderAll() {
 // --- Setup tab -------------------------------------------------------------------------------
 function renderSetup() {
   $("client").value = load("client", CLIENT_ID);
+  $("version").textContent = `App version ${APP_VERSION}`;
   const ids = Object.keys(days);
   $("days").innerHTML = ids.length ? ids.map((id) => {
     const n = Object.values(ratings[id] || {}).filter((x) => !x.skipped).length;
