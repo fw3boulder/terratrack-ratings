@@ -7,6 +7,7 @@
 <meta name="theme-color" content="#f8f9fa">
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="icon" href="icon-192.png">
+<link rel="stylesheet" href="lib/leaflet.css">
 <style>
   :root {
     --bg: #f8f9fa; --card: #ffffff; --ink: #212529; --muted: #6c757d; --line: #dee2e6;
@@ -56,6 +57,15 @@
   label { display: block; margin: 10px 0 4px; font-weight: 600; }
   .hidden { display: none !important; }
   .msg { font-size: 14px; margin: 6px 0; }
+  .daymap { height: 190px; border-radius: 10px; border: 1px solid var(--line); margin-bottom: 8px; background: #eef1f3; cursor: pointer; }
+  .strip { display: flex; gap: 2px; height: 14px; margin: 0 0 10px; }
+  .strip button { border: 0; padding: 0; border-radius: 3px; min-width: 4px; cursor: pointer; }
+  .town { font: 600 11px/1 system-ui, sans-serif; color: #212529; white-space: nowrap; display: inline-block;
+    transform: translate(-50%, -50%); text-shadow: 0 0 2px #fff, 0 0 2px #fff, 0 0 3px #fff; pointer-events: none; }
+  .town.big { font-size: 13px; font-weight: 700; }
+  #full { position: fixed; inset: 0; background: var(--bg); z-index: 1000; display: flex; flex-direction: column; }
+  #full .bar { display: flex; align-items: center; justify-content: space-between; padding: 10px 16px; }
+  #fullmap { flex: 1; }
 </style>
 </head>
 <body>
@@ -97,6 +107,13 @@
   </div>
 </section>
 
+<div id="full" class="hidden">
+  <div class="bar"><span class="muted">Blue: this chunk · colors: your ratings · gray: still to rate</span>
+    <button id="fullClose" class="chip" type="button">✕ Close</button></div>
+  <div id="fullmap"></div>
+</div>
+
+<script src="lib/leaflet.js"></script>
 <script src="app.js"></script>
 </body>
 </html>

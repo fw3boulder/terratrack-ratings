@@ -72,19 +72,15 @@ function renderRate() {
   const c = d.chunks[idx];
   const saved = r[c.id];
   draft = draft && draft.id === c.id ? draft : { id: c.id, cls: saved?.cls_name || null, liked: saved?.liked || 0, note: saved?.note || "" };
-  const pts = c.shape.map((p) => p.join(",")).join(" ");
-  const [sx, sy] = c.shape[0], [ex, ey] = c.shape[c.shape.length - 1];
   const asSaid = CLASSES.includes(c.guess);
   el.innerHTML = `
     <p class="muted">${left} of ${d.chunks.length} left · chunk ${idx + 1}</p>
     <div class="card">
+      <div id="daymap" class="daymap" role="button" aria-label="Map of the day's ride; tap for a bigger map"></div>
+      ${strip(d, r, idx)}
       <h2>${esc(c.roads)}</h2>
-      <div class="facts">Mile ${c.from_mi}–${c.to_mi} · ${c.miles} mi · climbs ${c.climb_ft} ft</div>
+      <div class="facts">Mile ${c.from_mi}–${c.to_mi} of ${d.miles} · ${c.miles} mi · climbs ${c.climb_ft} ft</div>
       <div class="facts">${esc(c.start)} ${esc(c.end)}${c.near ? " · near " + esc(c.near) : ""}</div>
-      <svg class="shape" viewBox="0 0 100 100" aria-label="Shape of this stretch, north up">
-        <polyline points="${pts}" fill="none" stroke="${guessColor(c.guess)}" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
-        <circle cx="${sx}" cy="${sy}" r="3.5" fill="#2f9e44"/><circle cx="${ex}" cy="${ey}" r="3.5" fill="#212529"/>
-      </svg>
       <div class="muted">TerraTrack thought: <span class="guess" style="background:${guessColor(c.guess)}">${esc(c.guess)}</span> ${esc(WORDS[c.guess] || "")}</div>
       <div class="grid" role="group" aria-label="Class">
         ${CLASSES.map((k) => `<button type="button" data-cls="${k}" aria-pressed="${draft.cls === k}" style="border-bottom:5px solid ${guessColor(k)}">${k}</button>`).join("")}
@@ -109,6 +105,90 @@ function renderRate() {
   $("back").onclick = () => { draft = null; idx = Math.max(0, idx - 1); renderRate(); };
   $("skip").onclick = () => { store(c, { skipped: true }); move(); };
   $("next").onclick = () => { if (draft.cls) store(c, { cls_name: draft.cls }); move(); };
+  el.querySelectorAll("[data-jump]").forEach((b) => b.onclick = () => { draft = null; idx = +b.dataset.jump; renderRate(); });
+  miniMap = drawDay(miniMap, "daymap", d, r, idx, false);
+  $("daymap").onclick = () => openFull(d, r, idx);
+}
+
+// --- Day map (Leaflet; the topo tiles are saved on the phone when a trip day is loaded) ------
+const TILES = "https://basemap.nationalmap.gov/arcgis/rest/services/USGSTopo/MapServer/tile/{z}/{y}/{x}";
+const TILE_CACHE = "tt-tiles";
+const RATED = { "1": "#495057", "2": "#2f9e44", "3a": "#e8b007", "3b": "#f76707", "4": "#d6336c", "5": "#862e9c" };
+let miniMap = null, fullMap = null;
+
+function routeOf(d) { return d.route || d.chunks.flatMap((c) => c.coords); }
+
+function drawDay(map, elId, d, r, current, full) {
+  if (typeof L === "undefined") { $(elId).textContent = "Map not available."; return null; }
+  if (map) map.remove();
+  map = L.map(elId, { zoomControl: full, attributionControl: full, dragging: full, scrollWheelZoom: full,
+                      doubleClickZoom: full, boxZoom: false, keyboard: false, touchZoom: full, tap: false });
+  L.tileLayer(TILES, { maxZoom: 16, maxNativeZoom: 16, attribution: "USGS The National Map" }).addTo(map);
+  L.polyline(routeOf(d), { color: "#868e96", weight: full ? 4 : 3, opacity: 0.9 }).addTo(map);
+  d.chunks.forEach((c, i) => {
+    const s = r[c.id];
+    if (s && s.cls_name && i !== current) L.polyline(c.coords, { color: RATED[s.cls_name], weight: full ? 5 : 4 }).addTo(map);
+  });
+  const c = d.chunks[current];
+  L.polyline(c.coords, { color: "#fff", weight: full ? 11 : 9 }).addTo(map);
+  L.polyline(c.coords, { color: "#1c7ed6", weight: full ? 7 : 6 }).addTo(map);
+  const route = routeOf(d);
+  L.circleMarker(route[0], { radius: 6, color: "#fff", weight: 2, fillColor: "#2f9e44", fillOpacity: 1 }).addTo(map).bindTooltip("Start");
+  L.circleMarker(route[route.length - 1], { radius: 6, color: "#fff", weight: 2, fillColor: "#212529", fillOpacity: 1 }).addTo(map).bindTooltip("Finish");
+  (d.towns || []).slice(0, full ? 40 : 6).forEach((t) => L.marker([t.lat, t.lon], { interactive: false, icon: L.divIcon({
+    className: "", iconSize: [0, 0], html: `<div class="town ${t.kind === "city" || t.kind === "town" ? "big" : ""}">${esc(t.name)}</div>` }) }).addTo(map));
+  if (full) map.fitBounds(L.latLngBounds(c.coords).pad(0.6));
+  else map.fitBounds(L.latLngBounds(route), { padding: [8, 8] });
+  return map;
+}
+
+function openFull(d, r, current) {
+  $("full").classList.remove("hidden");
+  fullMap = drawDay(fullMap, "fullmap", d, r, current, true);
+  setTimeout(() => fullMap && fullMap.invalidateSize(), 50);
+}
+$("fullClose").onclick = () => { $("full").classList.add("hidden"); };
+
+function strip(d, r, current) {
+  // One bar for the whole day, a block per chunk (width by miles); tap one to go to it.
+  return `<div class="strip" aria-label="Where this chunk is in the day">` + d.chunks.map((c, i) => {
+    const s = r[c.id];
+    const bg = i === current ? "#1c7ed6" : s && s.cls_name ? RATED[s.cls_name] : s ? "#ffd8a8" : "#dee2e6";
+    return `<button type="button" data-jump="${i}" style="flex:${Math.max(c.miles, 0.3)};background:${bg}" aria-label="Chunk ${i + 1}: ${esc(c.roads)}"></button>`;
+  }).join("") + `</div>`;
+}
+
+function tilesFor(route, maxTiles = 400) {
+  // Tile addresses covering the route's box, from the zoom that shows it all to three steps closer.
+  const lats = route.map((p) => p[0]), lons = route.map((p) => p[1]);
+  const box = [Math.min(...lats), Math.min(...lons), Math.max(...lats), Math.max(...lons)];
+  const tx = (lon, z) => Math.floor((lon + 180) / 360 * 2 ** z);
+  const ty = (lat, z) => { const r = lat * Math.PI / 180; return Math.floor((1 - Math.log(Math.tan(r) + 1 / Math.cos(r)) / Math.PI) / 2 * 2 ** z); };
+  let z0 = 16;
+  while (z0 > 5 && (tx(box[3], z0) - tx(box[1], z0) > 2 || ty(box[0], z0) - ty(box[2], z0) > 2)) z0--;
+  const out = [];
+  for (let z = Math.max(z0 - 1, 0); z <= Math.min(z0 + 3, 16); z++) {
+    for (let x = tx(box[1], z); x <= tx(box[3], z); x++)
+      for (let y = ty(box[2], z); y <= ty(box[0], z); y++) {
+        if (out.length >= maxTiles) return out;
+        out.push(TILES.replace("{z}", z).replace("{x}", x).replace("{y}", y));
+      }
+  }
+  return out;
+}
+
+async function saveTiles(d, report) {
+  if (!("caches" in window) || !navigator.onLine) return;
+  const urls = tilesFor(routeOf(d));
+  const cache = await caches.open(TILE_CACHE);
+  let done = 0;
+  for (let i = 0; i < urls.length; i += 6) {
+    await Promise.all(urls.slice(i, i + 6).map(async (u) => {
+      try { if (!(await cache.match(u))) await cache.put(u, await fetch(u, { mode: "no-cors" })); } catch (e) { /* skip */ }
+      done++;
+    }));
+    report(done, urls.length);
+  }
 }
 
 function store(c, fields) {
@@ -165,7 +245,12 @@ $("file").onchange = async (e) => {
     days[data.id] = data;
     save("days", days);
     $("loadMsg").textContent = `✓ Loaded ${data.name}: ${data.chunks.length} chunks, ${data.miles} mi.`;
+    const loaded = $("loadMsg").textContent;
     choose(data.id);
+    tab("setup");
+    saveTiles(data, (n, of) => {
+      $("loadMsg").textContent = `${loaded} ${n < of ? `Saving the map for no signal: ${n}/${of}…` : "✓ Map saved for no signal."}`;
+    });
   } catch (err) {
     $("loadMsg").textContent = `✕ Couldn't load that file (${err.message}).`;
   }
