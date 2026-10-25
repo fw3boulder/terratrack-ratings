@@ -1,0 +1,102 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>TerraTrack Ratings</title>
+<meta name="theme-color" content="#f8f9fa">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon-192.png">
+<style>
+  :root {
+    --bg: #f8f9fa; --card: #ffffff; --ink: #212529; --muted: #6c757d; --line: #dee2e6;
+    --accent: #1c7ed6; --ok: #2f9e44; --warn: #e8590c; --bad: #c92a2a;
+    --c1: #495057; --c2: #2f9e44; --c3: #e8b007; --c35: #f76707; --c4: #d6336c; --c5: #862e9c;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; background: var(--bg); color: var(--ink);
+    font: 16px/1.4 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  body { padding: 12px 16px calc(24px + env(safe-area-inset-bottom)); max-width: 560px; margin: 0 auto; }
+  header { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; }
+  header h1 { font-size: 18px; margin: 0; flex: 1; }
+  .chip { font-size: 13px; padding: 4px 10px; border-radius: 999px; border: 1px solid var(--line); background: var(--card);
+    white-space: nowrap; }
+  .chip.ok { color: var(--ok); border-color: var(--ok); }
+  .chip.wait { color: var(--warn); border-color: var(--warn); }
+  button.chip { cursor: pointer; }
+  select, textarea, input[type=text] { width: 100%; font: inherit; padding: 10px; border: 1px solid var(--line);
+    border-radius: 10px; background: var(--card); color: var(--ink); }
+  .row { display: flex; gap: 8px; align-items: center; }
+  .row > * { flex: 1; }
+  .muted { color: var(--muted); font-size: 14px; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 14px; margin: 10px 0; }
+  .card h2 { font-size: 20px; margin: 0 0 4px; }
+  .facts { font-size: 15px; color: var(--muted); }
+  .shape { width: 100%; max-width: 150px; height: auto; display: block; margin: 8px auto; }
+  .guess { display: inline-block; font-size: 14px; padding: 2px 8px; border-radius: 6px; color: #fff; }
+  .grid { display: grid; grid-template-columns: repeat(6, 1fr); gap: 6px; margin: 10px 0 6px; }
+  .grid button, .big, .thumbs button, .nav button {
+    font: inherit; font-weight: 600; min-height: 48px; border-radius: 10px; border: 2px solid var(--line);
+    background: var(--card); color: var(--ink); cursor: pointer; }
+  .grid button[aria-pressed=true] { border-color: var(--ink); box-shadow: inset 0 0 0 2px var(--ink); }
+  .big { width: 100%; margin: 4px 0 8px; font-weight: 500; }
+  .big[aria-pressed=true] { border-color: var(--accent); color: var(--accent); }
+  .thumbs { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin-bottom: 8px; }
+  .thumbs button[aria-pressed=true] { border-color: var(--accent); background: #e7f1fb; }
+  .nav { display: grid; grid-template-columns: 1fr 1fr 2fr; gap: 6px; margin-top: 10px; }
+  .nav .next { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .list { list-style: none; padding: 0; margin: 0; }
+  .list li { display: flex; gap: 10px; align-items: center; padding: 10px 4px; border-bottom: 1px solid var(--line); cursor: pointer; }
+  .list .mark { width: 74px; flex: none; font-size: 14px; }
+  .done { color: var(--ok); } .todo { color: var(--muted); } .skip { color: var(--warn); }
+  .empty { text-align: center; padding: 30px 10px; }
+  .tabs { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 6px; margin: 8px 0; }
+  .tabs button { font: inherit; padding: 8px; border-radius: 10px; border: 1px solid var(--line); background: var(--card); color: var(--ink); }
+  .tabs button[aria-pressed=true] { border-color: var(--accent); color: var(--accent); font-weight: 600; }
+  label { display: block; margin: 10px 0 4px; font-weight: 600; }
+  .hidden { display: none !important; }
+  .msg { font-size: 14px; margin: 6px 0; }
+</style>
+</head>
+<body>
+<header>
+  <h1>TerraTrack ratings</h1>
+  <button id="sync" class="chip" type="button">…</button>
+</header>
+
+<div class="row">
+  <select id="day" aria-label="Trip day"></select>
+</div>
+<div class="tabs" role="tablist">
+  <button id="tabRate" type="button" aria-pressed="true">Rate</button>
+  <button id="tabList" type="button" aria-pressed="false">All</button>
+  <button id="tabSetup" type="button" aria-pressed="false">Setup</button>
+</div>
+
+<main id="rate"></main>
+<main id="all" class="hidden"></main>
+
+<section id="setup" class="hidden">
+  <div class="card">
+    <h2>Load a trip day</h2>
+    <p class="muted">Pick a <b>.trip.json</b> file TerraTrack saved to your Google Drive ("TerraTrack trips"). Do this while you have signal; the app then keeps it.</p>
+    <input id="file" type="file" accept=".json,application/json">
+    <p id="loadMsg" class="msg"></p>
+  </div>
+  <div class="card">
+    <h2>Google Drive sync</h2>
+    <p class="muted">Ratings are kept on the phone and sent to your Google Drive ("TerraTrack ratings") whenever there is signal. Sign in once.</p>
+    <label for="client">Google app ID (client ID)</label>
+    <input id="client" type="text" placeholder="1234-abc.apps.googleusercontent.com" autocomplete="off">
+    <button id="signin" class="big" type="button">Sign in with Google</button>
+    <p id="driveMsg" class="msg"></p>
+  </div>
+  <div class="card">
+    <h2>Trip days on this phone</h2>
+    <ul id="days" class="list"></ul>
+  </div>
+</section>
+
+<script src="app.js"></script>
+</body>
+</html>
