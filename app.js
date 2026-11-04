@@ -2,11 +2,12 @@
 // Everything lives in this phone's storage; Drive gets one ratings file per trip day.
 "use strict";
 
-const CLASSES = ["1", "2", "3a", "3b", "4", "5"];
-const COLORS = { "1": "var(--c1)", "2": "var(--c2)", "3a": "var(--c3)", "3a/3b?": "var(--c3)", "3b": "var(--c35)",
-                 "4": "var(--c4)", "5": "var(--c5)" };
-const WORDS = { "1": "paved", "2": "maintained gravel", "3a": "rough dirt", "3a/3b?": "rough dirt, maybe 3b",
-                "3b": "rough, knobbies", "4": "rocky two-track", "5": "extreme", "?": "unknown" };
+// One Class 3, knobbies always (D72). 3a, 3b and "3a/3b?" are older names, still on days rated before; all Class 3.
+const CLASSES = ["1", "2", "3", "4", "5"];
+const COLORS = { "1": "var(--c1)", "2": "var(--c2)", "3": "var(--c3)", "3a": "var(--c3)", "3a/3b?": "var(--c3)",
+                 "3b": "var(--c3)", "4": "var(--c4)", "5": "var(--c5)" };
+const WORDS = { "1": "paved", "2": "maintained gravel", "3": "rough dirt", "3a": "rough dirt", "3a/3b?": "rough dirt",
+                "3b": "rough dirt", "4": "rocky two-track", "5": "extreme", "?": "unknown" };
 const FOLDER = "TerraTrack ratings";
 const SCOPE = "https://www.googleapis.com/auth/drive.file";
 // The OAuth client ID of the "TerraTrack" Google Cloud project (not a secret: Google shows it to every
@@ -35,7 +36,7 @@ let draft = null;                      // the card's unsaved choices
 let tokenClient = null;
 
 if (navigator.storage && navigator.storage.persist) navigator.storage.persist().catch(() => {});
-const APP_VERSION = 7;  // shown under Setup; keep in step with VERSION in sw.js
+const APP_VERSION = 8;  // shown under Setup; keep in step with VERSION in sw.js
 if ("serviceWorker" in navigator) {
   // When an update takes over, reload once so the new version shows straight away.
   const hadController = !!navigator.serviceWorker.controller;
@@ -128,7 +129,8 @@ function renderRate() {
 // --- Day map (Leaflet; the topo tiles are saved on the phone when a trip day is loaded) ------
 const TILES = "https://basemap.nationalmap.gov/arcgis/rest/services/USGSTopo/MapServer/tile/{z}/{y}/{x}";
 const TILE_CACHE = "tt-tiles";
-const RATED = { "1": "#495057", "2": "#2f9e44", "3a": "#e8b007", "3b": "#f76707", "4": "#d6336c", "5": "#862e9c" };
+const RATED = { "1": "#495057", "2": "#2f9e44", "3": "#e8b007", "3a": "#e8b007", "3b": "#e8b007", "4": "#d6336c",
+                "5": "#862e9c" };
 let miniMap = null, fullMap = null;
 
 function routeOf(d) { return d.route || d.chunks.flatMap((c) => c.coords); }
@@ -380,11 +382,13 @@ function chip() {
   const b = $("sync");
   b.className = "chip";
   if (!load("client", CLIENT_ID)) { b.textContent = "⚙ Set up sync"; return; }
+  if (!usesDrive()) { b.textContent = "📤 Send ratings"; return; }
   if (!dirty.length) { b.textContent = lastSync ? `✓ Synced ${hhmm(lastSync)}` : "✓ Nothing to send"; b.classList.add("ok"); return; }
   b.classList.add("wait");
   b.textContent = !navigator.onLine ? `⏳ ${dirty.length} waiting for signal` : tokenOk() ? "↻ Syncing…" : "↻ Tap to sync";
 }
 function tokenOk() { return token && token.exp > Date.now() + 60000; }
+function usesDrive() { return !!drive.folderId || tokenOk(); }  // a rider who sends files never signs in
 
 function gis() {
   // Google's sign-in script; only loads with signal (the app works without it).
@@ -482,7 +486,32 @@ async function sync(interactive) {
   }
 }
 
-$("sync").onclick = () => { if (!load("client", CLIENT_ID)) tab("setup"); else sync(true); };
+$("sync").onclick = () => { if (!load("client", CLIENT_ID) || !usesDrive()) tab("setup"); else sync(true); };
+
+// --- Send ratings as a file (a rider with no Drive sign-in; D81) --------------------------------
+// A .txt on purpose: Android's share sheet refuses .json files. TerraTrack reads the text as JSON.
+$("send").onclick = async () => {
+  const msg = $("sendMsg");
+  const body = current ? payload(current) : null;
+  const n = body ? JSON.parse(body).ratings.length : 0;
+  if (!n) { msg.textContent = "No ratings on this day yet."; return; }
+  const file = new File([body], `${current}-ratings.txt`, { type: "text/plain" });
+  try {
+    if (navigator.canShare && navigator.canShare({ files: [file] })) {
+      await navigator.share({ files: [file], title: `TerraTrack ratings: ${days[current].name}` });
+      msg.textContent = `✓ ${n} rating${n === 1 ? "" : "s"} in the file. You can send it again after changes.`;
+    } else {  // no share sheet here: save the file instead
+      const a = document.createElement("a");
+      a.href = URL.createObjectURL(file);
+      a.download = file.name;
+      a.click();
+      URL.revokeObjectURL(a.href);
+      msg.textContent = `✓ Saved ${file.name} (${n} rating${n === 1 ? "" : "s"}). Send it from your Downloads.`;
+    }
+  } catch (e) {
+    if (e.name !== "AbortError") msg.textContent = `✕ Couldn't send it (${e.message}). Your ratings are safe on the phone.`;
+  }
+};
 $("signin").onclick = async () => {
   const v = $("client").value.trim();
   if (!v.endsWith(".apps.googleusercontent.com")) { $("driveMsg").textContent = "✕ That doesn't look like a Google client ID."; return; }
